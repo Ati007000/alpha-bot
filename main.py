@@ -1,54 +1,53 @@
-import os
-import logging
-import sqlite3
+import os, logging, sqlite3, requests, random, asyncio
 from datetime import datetime
 from dotenv import load_dotenv
-
-import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ApplicationBuilder, JobQueue
 from telegram.constants import ParseMode
 
-# -------------------- ENV --------------------
 load_dotenv()
+
+# ---------------- ENV ----------------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CMC_API_KEY = os.getenv("COINMARKETCAP_API_KEY")
+CMC_API_KEY = os.getenv("CMC_API_KEY")
+TWITTER_BEARER = os.getenv("TWITTER_BEARER")
+SENTIMENT_API_KEY = os.getenv("SENTIMENT_API_KEY")
+ALERT_GROUP_ID = int(os.getenv("ALERT_GROUP_ID"))
 
-if not TELEGRAM_TOKEN:
-    raise ValueError("TELEGRAM_TOKEN missing!")
-if not CMC_API_KEY:
-    raise ValueError("COINMARKETCAP_API_KEY missing!")
+# ---------------- LOGGING ----------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
 
-# -------------------- LOGGING --------------------
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# -------------------- DATABASE --------------------
+# ---------------- DATABASE ----------------
 DB_PATH = "portfolio.db"
+conn = sqlite3.connect(DB_PATH)
+conn.execute('''CREATE TABLE IF NOT EXISTS portfolio(
+    user_id INTEGER, 
+    symbol TEXT, 
+    amount REAL, 
+    PRIMARY KEY(user_id, symbol)
+)''')
+conn.execute('''CREATE TABLE IF NOT EXISTS alerts_sent(
+    user_id INTEGER,
+    symbol TEXT,
+    alert_type TEXT,
+    last_sent TIMESTAMP,
+    PRIMARY KEY(user_id, symbol, alert_type)
+)''')
+conn.commit()
+conn.close()
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS portfolio (
-                    user_id INTEGER,
-                    symbol TEXT,
-                    amount REAL,
-                    PRIMARY KEY (user_id, symbol)
-                 )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS alerts (
-                    user_id INTEGER,
-                    symbol TEXT,
-                    target REAL,
-                    above INTEGER,
-                    PRIMARY KEY (user_id, symbol, target)
-                 )''')
-    conn.commit()
-    conn.close()
+# ---------------- HELPERS ----------------
+def box(title, content):
+    return f"🚀 *{title}*\n\n{content}\n\n_SuperIntelligent Bot • {datetime.utcnow().strftime('%H:%M UTC')}_"
 
-init_db()
+def main_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Price", "price"), InlineKeyboardButton("🔥 Arbitrage", "arb")],
+        [InlineKeyboardButton("🧠 Twitter Sentiment", "sentiment"), InlineKeyboardButton("⚡ Pump Detector", "pump")],
+        [InlineKeyboardButton("💼 Portfolio", "portfolio"), InlineKeyboardButton("📰 News", "news")],
+        [InlineKeyboardButton("🐋 Whale Alerts", "whale")]
+    ])
 
 def get_portfolio(user_id):
     conn = sqlite3.connect(DB_PATH)
@@ -61,155 +60,175 @@ def get_portfolio(user_id):
 def update_portfolio(user_id, symbol, amount):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute(
-        "INSERT OR REPLACE INTO portfolio (user_id, symbol, amount) VALUES (?, ?, ?)",
-        (user_id, symbol, amount)
-    )
+    c.execute("INSERT OR REPLACE INTO portfolio (user_id,symbol,amount) VALUES (?,?,?)", (user_id,symbol,amount))
     conn.commit()
     conn.close()
 
-# -------------------- HELPERS --------------------
-def box(title: str, content: str) -> str:
-    return f"🚀 *{title}*\n\n{content}\n\n_Alpha Bot Premium • {datetime.utcnow().strftime('%H:%M UTC')}_"
-
-def main_menu_keyboard():
-    keyboard = [
-        [InlineKeyboardButton("📊 Price", callback_data="price"), InlineKeyboardButton("🔥 Market Movers", callback_data="movers")],
-        [InlineKeyboardButton("💼 Portfolio", callback_data="portfolio"), InlineKeyboardButton("📰 News + Suggestion", callback_data="news")],
-        [InlineKeyboardButton("🔔 Price Alerts", callback_data="alerts"), InlineKeyboardButton("👁 Watchlist", callback_data="watchlist")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-# -------------------- API HELPERS --------------------
-def get_price(symbol: str):
+# ---------------- API HELPERS ----------------
+def coinmarketcap_price(symbol):
     try:
         url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
         headers = {"X-CMC_PRO_API_KEY": CMC_API_KEY}
-        r = requests.get(url, headers=headers, params={"symbol": symbol, "convert": "USD"}, timeout=10)
-        data = r.json()
-        coin = data["data"].get(symbol)
-        if isinstance(coin, list):
-            coin = coin[0]
-        q = coin["quote"]["USD"]
-        price = q["price"]
-        change24h = q.get("percent_change_24h", 0)
-        return price, change24h
-    except Exception as e:
-        logger.warning(f"Error fetching price for {symbol}: {e}")
-        return 0, 0
+        r = requests.get(url, headers=headers, params={"symbol":symbol,"convert":"USD"},timeout=10)
+        data = r.json().get("data", {}).get(symbol, {})
+        q = data.get("quote",{}).get("USD",{})
+        return q.get("price",0), q.get("percent_change_24h",0), q.get("volume_24h",0)
+    except: return 0,0,0
 
-def get_latest_news(limit=5):
+def dexscreener_arb(symbol):
     try:
-        r = requests.get("https://min-api.cryptocompare.com/data/v2/news/?lang=EN", timeout=10)
-        return r.json().get("Data", [])[:limit]
-    except:
-        return []
+        r = requests.get(f"https://api.dexscreener.com/latest/dex/search?q={symbol}", timeout=7).json()
+        pairs = r.get("pairs",[])
+        best = {}
+        for p in pairs:
+            chain = p.get("chainId")
+            price = float(p.get("priceUsd",0))
+            best.setdefault(chain, price)
+        if not best: return {}
+        highest = max(best, key=best.get)
+        lowest = min(best, key=best.get)
+        return {"chain_high": highest, "chain_low": lowest, "hi_price":best[highest], "lo_price":best[lowest]}
+    except: return {}
 
-def analyze_news(symbol: str, change24h: float, news_items: list):
-    lower_news = " ".join([item["title"].lower() + " " + item.get("body", "").lower() for item in news_items])
-    suggestion = "NEUTRAL"
-    reason = "No strong signals detected"
+def twitter_fetch_tweets(symbol):
+    headers = {"Authorization": f"Bearer {TWITTER_BEARER}"}
+    query = f"{symbol} -is:retweet lang:en"
+    r = requests.get(f"https://api.twitter.com/2/tweets/search/recent?query={query}&max_results=30", headers=headers).json()
+    return [t.get("text","") for t in r.get("data",[])]
 
-    if any(kw in lower_news for kw in ["war", "iran", "middle east", "geopolitical", "conflict", "strait of hormuz", "oil supply"]):
-        suggestion = "SELL"
-        reason = "Geopolitical tensions detected → risk-off sentiment"
-    elif any(kw in lower_news for kw in ["cpi higher", "inflation hot", "fed hike", "hawkish"]):
-        suggestion = "SELL"
-        reason = "Macro: higher CPI / hawkish Fed → bearish"
-    elif any(kw in lower_news for kw in ["cpi lower", "inflation cooled", "fed cut", "dovish"]):
-        suggestion = "BUY"
-        reason = "Macro: CPI cooled / dovish Fed → bullish"
-    elif change24h > 5:
-        suggestion = "BUY"
-        reason = "Strong bullish momentum"
-    elif change24h < -5:
-        suggestion = "SELL"
-        reason = "Bearish momentum"
-    return suggestion, reason
+def sentiment_score_meaningcloud(text):
+    url = "https://api.meaningcloud.com/sentiment-2.1"
+    data = {"key": SENTIMENT_API_KEY, "txt": text, "lang":"en"}
+    try:
+        r = requests.post(url, data=data).json()
+        score = r.get("score_tag","NEU")
+        return {"P+":1.0,"P":0.5,"NEU":0,"N":-0.5,"N+":-1.0}.get(score,0)
+    except: return 0
 
-# -------------------- COMMAND HANDLERS --------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Welcome to Alpha Bot Premium! Use the menu below:",
-        reply_markup=main_menu_keyboard()
-    )
+def twitter_sentiment(symbol):
+    texts = twitter_fetch_tweets(symbol)
+    if not texts: return 0
+    scores = [sentiment_score_meaningcloud(t) for t in texts]
+    return round(sum(scores)/len(scores),2)
 
-async def news_suggest(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    symbol = (context.args[0].upper() if context.args else "BTC")
-    price, change24h = get_price(symbol)
-    news_items = get_latest_news()
-    news_summary = "\n".join([f"• {item['title'][:90]}..." for item in news_items])
-    suggestion, reason = analyze_news(symbol, change24h, news_items)
-    msg = box(
-        f"{symbol} MARKET INTELLIGENCE",
-        f"💵 Price: `${price:,.6f}`\n📈 24h: `{change24h:+.2f}%`\n\n"
-        f"📰 Recent Headlines:\n{news_summary[:700]}...\n\n"
-        f"🔮 Recommendation: {suggestion}\nReason: {reason}\n\n"
-        f"⚠️ AI-assisted analysis — not financial advice. DYOR!"
-    )
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+# ---------------- AI PUMP ----------------
+def pump_probability(symbol):
+    price, change, volume = coinmarketcap_price(symbol)
+    sentiment = twitter_sentiment(symbol)
+    arb = dexscreener_arb(symbol)
+    arb_gain = ((arb.get('hi_price',0)-arb.get('lo_price',0))/arb.get('lo_price',1))*100 if arb else 0
+    pump_score = (change*0.4)+(sentiment*20)+(arb_gain*0.4)
+    pump_score = min(max(pump_score,0),100)
+    return round(pump_score,2)
 
-async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    symbol = (context.args[0].upper() if context.args else "BTC")
-    price_val, change24h = get_price(symbol)
-    msg = box(f"{symbol} Price", f"💵 ${price_val:,.6f}\n📈 24h Change: {change24h:+.2f}%")
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+# ---------------- WHALE ALERTS ----------------
+def whale_alerts(symbol):
+    # Mock data: Replace with API calls to Ethereum/BSC/Solana explorers
+    whales = []
+    for chain in ["ETH","BSC","SOL"]:
+        amt = random.uniform(1000,5000)
+        if amt>3000: whales.append(f"{chain} whale transfer detected: {amt:.2f} {symbol}")
+    return whales
 
-async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Buy command — implement your logic.")
+# ---------------- COMMAND HANDLERS ----------------
+async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Welcome to Mega Crypto Bot!", reply_markup=main_menu_keyboard())
 
-async def sell(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Sell command — implement your logic.")
+async def price_handler(update, ctx):
+    symbol = (ctx.args[0].upper() if ctx.args else "BTC")
+    price, change, _ = coinmarketcap_price(symbol)
+    await update.message.reply_text(box(f"{symbol} Price", f"💵 ${price:.4f}\n📈 24h: {change:+.2f}%"))
 
-async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def arb_handler(update, ctx):
+    symbol = (ctx.args[0].upper() if ctx.args else "BTC")
+    arb = dexscreener_arb(symbol)
+    if not arb:
+        await update.message.reply_text("No live DEX data found.")
+        return
+    gain = ((arb['hi_price']-arb['lo_price'])/arb['lo_price'])*100
+    txt = f"Buy: {arb['lo_price']:.4f} Sell: {arb['hi_price']:.4f} → Arb: {gain:.2f}%"
+    await update.message.reply_text(box(f"{symbol} DEX Arbitrage", txt))
+
+async def sentiment_handler(update, ctx):
+    symbol = (ctx.args[0].upper() if ctx.args else "BTC")
+    score = twitter_sentiment(symbol)
+    await update.message.reply_text(box(f"{symbol} Twitter Sentiment", f"Score: {score}"))
+
+async def pump_handler(update, ctx):
+    symbol = (ctx.args[0].upper() if ctx.args else "BTC")
+    score = pump_probability(symbol)
+    await update.message.reply_text(box(f"{symbol} Pump Probability", f"🌟 {score}%"))
+
+async def portfolio_handler(update, ctx):
     user_id = update.effective_user.id
     pf = get_portfolio(user_id)
-    if not pf:
-        await update.message.reply_text("Your portfolio is empty.")
-        return
+    if not pf: await update.message.reply_text("Your portfolio is empty."); return
     lines = [f"{sym}: {amt}" for sym, amt in pf.items()]
-    await update.message.reply_text(box("Your Portfolio", "\n".join(lines)), parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(box("Your Portfolio", "\n".join(lines)))
 
-# -------------------- BUTTON HANDLER --------------------
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
+async def news_handler(update, ctx):
+    await update.message.reply_text("News + Macro AI analysis coming soon (can integrate crypto news APIs)")
 
-    # Call the right function when a button is clicked
-    if data == "price":
-        await price(update, context)
-    elif data == "movers":
-        await query.edit_message_text("🔥 Market Movers placeholder — implement your logic here")
-    elif data == "portfolio":
-        await portfolio(update, context)
-    elif data == "news":
-        await news_suggest(update, context)
-    elif data == "alerts":
-        await query.edit_message_text("🔔 Price Alerts placeholder — implement logic")
-    elif data == "watchlist":
-        await query.edit_message_text("👁 Watchlist placeholder — implement logic")
-    else:
-        await query.edit_message_text("Unknown option clicked.")
+async def whale_handler(update, ctx):
+    symbol = (ctx.args[0].upper() if ctx.args else "BTC")
+    alerts = whale_alerts(symbol)
+    if not alerts: await update.message.reply_text("No whale activity detected."); return
+    await update.message.reply_text(box(f"{symbol} Whale Alerts", "\n".join(alerts)))
 
-# -------------------- MAIN --------------------
+# ---------------- BUTTON HANDLER ----------------
+async def button_handler(update, ctx):
+    q = update.callback_query
+    await q.answer()
+    if q.data == "price": await price_handler(update,ctx)
+    elif q.data == "arb": await arb_handler(update,ctx)
+    elif q.data == "sentiment": await sentiment_handler(update,ctx)
+    elif q.data == "pump": await pump_handler(update,ctx)
+    elif q.data == "portfolio": await portfolio_handler(update,ctx)
+    elif q.data == "news": await news_handler(update,ctx)
+    elif q.data == "whale": await whale_handler(update,ctx)
+    else: await q.edit_message_text("Feature coming soon!")
+
+# ---------------- BACKGROUND ALERT TASK ----------------
+async def alert_task(app: Application):
+    while True:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT DISTINCT user_id FROM portfolio")
+        users = [row[0] for row in c.fetchall()]
+        for user_id in users:
+            pf = get_portfolio(user_id)
+            for sym in pf.keys():
+                pump = pump_probability(sym)
+                if pump>80:  # high probability
+                    try:
+                        await app.bot.send_message(user_id, box(f"{sym} Pump Alert", f"High pump probability: {pump}%"))
+                    except: pass
+        conn.close()
+        await asyncio.sleep(300)  # every 5 minutes
+
+# ---------------- MAIN ----------------
 def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     # Commands
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("news", news_suggest))
-    app.add_handler(CommandHandler("suggest", news_suggest))
-    app.add_handler(CommandHandler("price", price))
-    app.add_handler(CommandHandler("buy", buy))
-    app.add_handler(CommandHandler("sell", sell))
-    app.add_handler(CommandHandler("portfolio", portfolio))
+    app.add_handler(CommandHandler("price", price_handler))
+    app.add_handler(CommandHandler("arb", arb_handler))
+    app.add_handler(CommandHandler("sentiment", sentiment_handler))
+    app.add_handler(CommandHandler("pump", pump_handler))
+    app.add_handler(CommandHandler("portfolio", portfolio_handler))
+    app.add_handler(CommandHandler("news", news_handler))
+    app.add_handler(CommandHandler("whale", whale_handler))
 
     # Buttons
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("🚀 Alpha Bot Premium ready!")
+    # Background alerts
+    loop = asyncio.get_event_loop()
+    loop.create_task(alert_task(app))
+
+    logger.info("🚀 Mega Crypto Bot is running!")
     app.run_polling(drop_pending_updates=True)
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
