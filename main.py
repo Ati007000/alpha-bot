@@ -50,7 +50,7 @@ MONITORED_ACCOUNTS = {
 
 # ---------------- HELPERS ----------------
 def box(title: str, content: str) -> str:
-    return f"🚀 *{title}*\n\n{content}\n\n_SuperIntelligent Bot • {datetime.utcnow().strftime('%H:%M UTC')}_"
+    return f"🚀 *{title}*\n\n{content}\n\n_{datetime.utcnow().strftime('%H:%M UTC')}_"
 
 def main_menu_keyboard():
     return InlineKeyboardMarkup([
@@ -186,16 +186,16 @@ def whale_alerts(symbol: str):
 # ---------------- COMMAND HANDLERS ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🚀 Welcome to **Mega Crypto Bot**!\n\nChoose an option below 👇",
+        "🚀 Welcome to *Mega Crypto Bot*!\n\nChoose an option below 👇",
         reply_markup=main_menu_keyboard(),
-        parse_mode=ParseMode.MARKDOWN_V2
+        parse_mode=ParseMode.MARKDOWN
     )
 
 async def price_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol = context.args[0].upper() if context.args else "BTC"
     price, change, _ = coinmarketcap_price(symbol)
     text = box(f"{symbol} Price", f"💵 ${price:.4f}\n📈 24h: {change:+.2f}%")
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 async def arb_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol = context.args[0].upper() if context.args else "BTC"
@@ -205,17 +205,17 @@ async def arb_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     gain = ((arb['hi_price'] - arb['lo_price']) / arb['lo_price']) * 100
     txt = f"Buy on {arb['chain_low']}: ${arb['lo_price']:.4f}\nSell on {arb['chain_high']}: ${arb['hi_price']:.4f}\n\n💰 Arb opportunity: {gain:.2f}%"
-    await update.message.reply_text(box(f"{symbol} DEX Arbitrage", txt), parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(box(f"{symbol} DEX Arbitrage", txt), parse_mode=ParseMode.MARKDOWN)
 
 async def sentiment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol = context.args[0].upper() if context.args else "BTC"
     score = twitter_sentiment(symbol)
-    await update.message.reply_text(box(f"{symbol} Twitter Sentiment", f"Score: {score}"), parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(box(f"{symbol} Twitter Sentiment", f"Score: {score}"), parse_mode=ParseMode.MARKDOWN)
 
 async def pump_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol = context.args[0].upper() if context.args else "BTC"
     score = pump_probability(symbol)
-    await update.message.reply_text(box(f"{symbol} Pump Probability", f"🌟 {score}%"), parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(box(f"{symbol} Pump Probability", f"🌟 {score}%"), parse_mode=ParseMode.MARKDOWN)
 
 async def portfolio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -224,12 +224,12 @@ async def portfolio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("💼 Your portfolio is empty.\n\nUse /add SYMBOL amount to add coins.")
         return
     lines = [f"• {sym}: {amt}" for sym, amt in pf.items()]
-    await update.message.reply_text(box("Your Portfolio", "\n".join(lines)), parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(box("Your Portfolio", "\n".join(lines)), parse_mode=ParseMode.MARKDOWN)
 
 async def add_portfolio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if len(context.args) < 2:
-        await update.message.reply_text("Usage: `/add SYMBOL amount`\nExample: `/add ETH 2.5`", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text("Usage: `/add SYMBOL amount`\nExample: `/add ETH 2.5`", parse_mode=ParseMode.MARKDOWN)
         return
     symbol = context.args[0].upper()
     try:
@@ -238,14 +238,14 @@ async def add_portfolio_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("❌ Invalid amount!")
         return
     update_portfolio(user_id, symbol, amount)
-    await update.message.reply_text(f"✅ Added {amount} {symbol} to your portfolio!", parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(f"✅ Added {amount} {symbol} to your portfolio!")
 
 async def news_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📰 **Live X News Alerts Active!**\n\n"
-        f"Market-moving tweets are being forwarded to your group (`-1003775368268`).\n"
+        "📰 *Live X News Alerts Active!*\n\n"
+        "Market-moving tweets are being forwarded to your alert group.\n"
         "Whale moves • BRICS updates • Trump statements → all covered instantly 🚀",
-        parse_mode=ParseMode.MARKDOWN_V2
+        parse_mode=ParseMode.MARKDOWN
     )
 
 async def whale_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -254,20 +254,54 @@ async def whale_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not alerts:
         await update.message.reply_text("🐋 No whale activity detected right now.")
         return
-    await update.message.reply_text(box(f"{symbol} Whale Alerts", "\n".join(alerts)), parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(box(f"{symbol} Whale Alerts", "\n".join(alerts)), parse_mode=ParseMode.MARKDOWN)
 
 # ---------------- BUTTON HANDLER ----------------
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.data == "price": await price_handler(update, context)
-    elif query.data == "arb": await arb_handler(update, context)
-    elif query.data == "sentiment": await sentiment_handler(update, context)
-    elif query.data == "pump": await pump_handler(update, context)
-    elif query.data == "portfolio": await portfolio_handler(update, context)
-    elif query.data == "news": await news_handler(update, context)
-    elif query.data == "whale": await whale_handler(update, context)
-    else: await query.edit_message_text("Feature coming soon! 🚀")
+    symbol = "BTC"
+    if query.data == "price":
+        price, change, _ = coinmarketcap_price(symbol)
+        text = box(f"{symbol} Price", f"💵 ${price:.4f}\n📈 24h: {change:+.2f}%")
+        await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+    elif query.data == "arb":
+        arb = dexscreener_arb(symbol)
+        if not arb:
+            await query.edit_message_text("❌ No live DEX data found.")
+            return
+        gain = ((arb['hi_price'] - arb['lo_price']) / arb['lo_price']) * 100
+        txt = f"Buy on {arb['chain_low']}: ${arb['lo_price']:.4f}\nSell on {arb['chain_high']}: ${arb['hi_price']:.4f}\n\n💰 Arb opportunity: {gain:.2f}%"
+        await query.edit_message_text(box(f"{symbol} DEX Arbitrage", txt), parse_mode=ParseMode.MARKDOWN)
+    elif query.data == "sentiment":
+        score = twitter_sentiment(symbol)
+        await query.edit_message_text(box(f"{symbol} Twitter Sentiment", f"Score: {score}"), parse_mode=ParseMode.MARKDOWN)
+    elif query.data == "pump":
+        score = pump_probability(symbol)
+        await query.edit_message_text(box(f"{symbol} Pump Probability", f"🌟 {score}%"), parse_mode=ParseMode.MARKDOWN)
+    elif query.data == "portfolio":
+        user_id = update.effective_user.id
+        pf = get_portfolio(user_id)
+        if not pf:
+            await query.edit_message_text("💼 Your portfolio is empty.\n\nUse /add SYMBOL amount to add coins.")
+            return
+        lines = [f"• {sym}: {amt}" for sym, amt in pf.items()]
+        await query.edit_message_text(box("Your Portfolio", "\n".join(lines)), parse_mode=ParseMode.MARKDOWN)
+    elif query.data == "news":
+        await query.edit_message_text(
+            "📰 *Live X News Alerts Active!*\n\n"
+            "Market-moving tweets are being forwarded to your alert group.\n"
+            "Whale moves • BRICS updates • Trump statements → all covered instantly 🚀",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    elif query.data == "whale":
+        alerts = whale_alerts(symbol)
+        if not alerts:
+            await query.edit_message_text("🐋 No whale activity detected right now.")
+            return
+        await query.edit_message_text(box(f"{symbol} Whale Alerts", "\n".join(alerts)), parse_mode=ParseMode.MARKDOWN)
+    else:
+        await query.edit_message_text("Feature coming soon! 🚀")
 
 # ---------------- BACKGROUND PUMP ALERTS ----------------
 async def send_pump_alerts(context: ContextTypes.DEFAULT_TYPE):
@@ -287,7 +321,7 @@ async def send_pump_alerts(context: ContextTypes.DEFAULT_TYPE):
             if pump > 80:
                 try:
                     msg = box(f"🚨 {sym} PUMP ALERT", f"High pump probability: {pump}%")
-                    await context.bot.send_message(chat_id=user_id, text=msg, parse_mode=ParseMode.MARKDOWN_V2)
+                    await context.bot.send_message(chat_id=user_id, text=msg, parse_mode=ParseMode.MARKDOWN)
                     c.execute("INSERT OR REPLACE INTO alerts_sent (user_id, symbol, alert_type, last_sent) VALUES (?, ?, 'pump', ?)", (user_id, sym, now))
                     conn.commit()
                 except Exception as e:
@@ -332,7 +366,7 @@ async def news_alert_task(context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(
                         chat_id=ALERT_GROUP_ID,
                         text=alert_text,
-                        parse_mode=ParseMode.MARKDOWN_V2,
+                        parse_mode=ParseMode.MARKDOWN,
                         disable_web_page_preview=True
                     )
                 except Exception as e:
@@ -343,7 +377,7 @@ async def news_alert_task(context: ContextTypes.DEFAULT_TYPE):
         elif last_id is None and tweets:
             newest_id = max((t["id"] for t in tweets), key=int)
             update_last_tweet_id(username, newest_id)
-            logger.info(f"✅ Initial sync completed for @{username}")
+            logger.info(f"Initial sync completed for @{username}")
 
 # ---------------- MAIN ----------------
 def main():
@@ -370,3 +404,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
