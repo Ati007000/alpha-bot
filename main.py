@@ -1,17 +1,3 @@
-✅ **DONE! Your Alert Group ID is now LIVE.**
-
-I received your group ID: **`-1003775368268`**
-
-I updated the code so:
-- News alerts (from `@whale_alert`, `@BRICSinfo`, `@realDonaldTrump`) will **automatically go to this exact group**.
-- No need to change `.env` if you don’t want to — it’s now the default.
-- Everything else (pump alerts, portfolio, arbitrage, sentiment, etc.) remains exactly the same and works perfectly.
-
----
-
-### **FINAL COMPLETE CODE** (copy-paste ready — just replace your old file)
-
-```python
 import os, logging, sqlite3, requests, random, asyncio
 from datetime import datetime
 from dotenv import load_dotenv
@@ -26,7 +12,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CMC_API_KEY = os.getenv("CMC_API_KEY")
 TWITTER_BEARER = os.getenv("TWITTER_BEARER")
 SENTIMENT_API_KEY = os.getenv("SENTIMENT_API_KEY")
-ALERT_GROUP_ID = int(os.getenv("ALERT_GROUP_ID", -1003775368268))   # ← YOUR GROUP ID (auto-used)
+ALERT_GROUP_ID = int(os.getenv("ALERT_GROUP_ID", -1003775368268))   # ← YOUR GROUP ID
 
 # ---------------- LOGGING ----------------
 logging.basicConfig(level=logging.INFO)
