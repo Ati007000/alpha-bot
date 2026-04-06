@@ -149,18 +149,17 @@ async def news_suggest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
 
-# Example placeholders for other commands
 async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol = (context.args[0].upper() if context.args else "BTC")
-    price, change24h = get_price(symbol)
-    msg = box(f"{symbol} Price", f"💵 ${price:,.6f}\n📈 24h Change: {change24h:+.2f}%")
+    price_val, change24h = get_price(symbol)
+    msg = box(f"{symbol} Price", f"💵 ${price_val:,.6f}\n📈 24h Change: {change24h:+.2f}%")
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
 
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Buy command placeholder — implement your logic.")
+    await update.message.reply_text("Buy command — implement your logic.")
 
 async def sell(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Sell command placeholder — implement your logic.")
+    await update.message.reply_text("Sell command — implement your logic.")
 
 async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -170,6 +169,28 @@ async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     lines = [f"{sym}: {amt}" for sym, amt in pf.items()]
     await update.message.reply_text(box("Your Portfolio", "\n".join(lines)), parse_mode=ParseMode.MARKDOWN_V2)
+
+# -------------------- BUTTON HANDLER --------------------
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    # Call the right function when a button is clicked
+    if data == "price":
+        await price(update, context)
+    elif data == "movers":
+        await query.edit_message_text("🔥 Market Movers placeholder — implement your logic here")
+    elif data == "portfolio":
+        await portfolio(update, context)
+    elif data == "news":
+        await news_suggest(update, context)
+    elif data == "alerts":
+        await query.edit_message_text("🔔 Price Alerts placeholder — implement logic")
+    elif data == "watchlist":
+        await query.edit_message_text("👁 Watchlist placeholder — implement logic")
+    else:
+        await query.edit_message_text("Unknown option clicked.")
 
 # -------------------- MAIN --------------------
 def main():
@@ -183,6 +204,9 @@ def main():
     app.add_handler(CommandHandler("buy", buy))
     app.add_handler(CommandHandler("sell", sell))
     app.add_handler(CommandHandler("portfolio", portfolio))
+
+    # Buttons
+    app.add_handler(CallbackQueryHandler(button_handler))
 
     logger.info("🚀 Alpha Bot Premium ready!")
     app.run_polling(drop_pending_updates=True)
