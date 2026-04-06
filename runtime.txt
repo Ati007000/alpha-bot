@@ -1,1 +1,5 @@
 python-3.12
+fix: force Python 3.12 to solve imghdr error
+
+
+
