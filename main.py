@@ -7,34 +7,222 @@ from telegram.ext import Updater, CommandHandler, CallbackContext
 
 load_dotenv()
 
+# =========================
 # ENV VARIABLES
+# =========================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CMC_API_KEY = os.getenv("COINMARKETCAP_API_KEY")
+CMC_API_URL = os.getenv("CMC_API_URL")
 PUMP_FUN_API = os.getenv("PUMP_FUN_API")
 
+# =========================
 # LOGGING
+# =========================
 logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="%(asctime)s | %(levelname)s | %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# START
+# =========================
+# HELPERS
+# =========================
+def box(title, content):
+    return f"🚀 *{title}*\n\n{content}"
+
+# =========================
+# COMMANDS
+# =========================
 def start(update: Update, context: CallbackContext):
-    message = (
-        "🚀 *Welcome to AlphaBot Premium*\n\n"
+    msg = box(
+        "ALPHA BOT PREMIUM",
         "📊 /price BTC\n"
         "🔥 /pumpfun\n"
         "📈 /trending\n"
         "⚠️ /alert BTC\n"
-        "💼 /portfolio 1000 1200"
+        "💼 /portfolio 1000 1200\n"
+        "🎯 /risk 1000 1200\n"
+        "📰 /news"
     )
-    update.message.reply_text(message, parse_mode="Markdown")
+    update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# PRICE COMMAND
+def help_command(update: Update, context: CallbackContext):
+    start(update, context)
+
+
 def price(update: Update, context: CallbackContext):
     try:
+        symbol = context.args[0].upper() if context.args else "BTC"
+
+        headers = {
+            "X-CMC_PRO_API_KEY": CMC_API_KEY
+        }
+
+        params = {
+            "symbol": symbol
+        }
+
+        response = requests.get(
+            CMC_API_URL,
+            headers=headers,
+            params=params,
+            timeout=10
+        )
+
+        data = response.json()
+
+        coin = data["data"][symbol][0]["quote"]["USD"]
+
+        trend = "Bullish 🔥" if coin["percent_change_24h"] > 0 else "Bearish ⚠️"
+
+        msg = box(
+            f"{symbol} LIVE",
+            f"💵 Price: ${coin['price']:,.4f}\n"
+            f"📈 24h: {coin['percent_change_24h']:.2f}%\n"
+            f"💰 Volume: ${coin['volume_24h']:,.0f}\n"
+            f"🏦 MCap: ${coin['market_cap']:,.0f}\n"
+            f"🔥 Trend: {trend}\n\n"
+            f"🚀 Sponsored: Join exchange for signup bonus"
+        )
+
+        update.message.reply_text(msg, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(e)
+        update.message.reply_text("⚠️ Price fetch failed.")
+
+
+def pumpfun(update: Update, context: CallbackContext):
+    try:
+        response = requests.get(PUMP_FUN_API, timeout=10)
+        data = response.json()
+
+        if len(data) == 0:
+            update.message.reply_text("No new launches.")
+            return
+
+        latest = data[0]
+
+        msg = box(
+            "LATEST PUMP.FUN",
+            f"🪙 Name: {latest.get('name', 'N/A')}\n"
+            f"🔖 Symbol: {latest.get('symbol', 'N/A')}\n"
+            f"🧾 Mint: `{latest.get('mint', 'N/A')}`\n"
+            f"⚠️ Check liquidity before entry"
+        )
+
+        update.message.reply_text(msg, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(e)
+        update.message.reply_text("⚠️ Pump.fun fetch failed.")
+
+
+def alert(update: Update, context: CallbackContext):
+    symbol = context.args[0].upper() if context.args else "BTC"
+
+    msg = box(
+        "SMART ALERTS",
+        f"📊 Coin: {symbol}\n"
+        "📈 Pump alerts\n"
+        "📉 Dump alerts\n"
+        "🐋 Whale alerts\n"
+        "🔥 Volume spikes"
+    )
+
+    update.message.reply_text(msg, parse_mode="Markdown")
+
+
+def trending(update: Update, context: CallbackContext):
+    msg = box(
+        "TRENDING MEME COINS",
+        "1️⃣ PEPE\n"
+        "2️⃣ BONK\n"
+        "3️⃣ WIF\n"
+        "4️⃣ FLOKI\n"
+        "5️⃣ DOGE"
+    )
+
+    update.message.reply_text(msg, parse_mode="Markdown")
+
+
+def portfolio(update: Update, context: CallbackContext):
+    try:
+        buy = float(context.args[0])
+        current = float(context.args[1])
+
+        pnl = current - buy
+        roi = (pnl / buy) * 100
+
+        msg = box(
+            "PORTFOLIO",
+            f"💵 Entry: ${buy}\n"
+            f"📊 Current: ${current}\n"
+            f"💰 P/L: ${pnl:.2f}\n"
+            f"📈 ROI: {roi:.2f}%"
+        )
+
+        update.message.reply_text(msg, parse_mode="Markdown")
+
+    except:
+        update.message.reply_text("Use: /portfolio 1000 1200")
+
+
+def risk(update: Update, context: CallbackContext):
+    try:
+        entry = float(context.args[0])
+        target = float(context.args[1])
+
+        rr = target / entry
+
+        msg = box(
+            "RISK REWARD",
+            f"🎯 Entry: ${entry}\n"
+            f"🚀 Target: ${target}\n"
+            f"⚖️ Ratio: {rr:.2f}"
+        )
+
+        update.message.reply_text(msg, parse_mode="Markdown")
+
+    except:
+        update.message.reply_text("Use: /risk 1000 1200")
+
+
+def news(update: Update, context: CallbackContext):
+    msg = box(
+        "MARKET NEWS",
+        "📰 BTC bullish\n"
+        "🔥 Meme coins trending\n"
+        "🐋 Whale wallet moved"
+    )
+
+    update.message.reply_text(msg, parse_mode="Markdown")
+
+
+# =========================
+# MAIN
+# =========================
+def main():
+    updater = Updater(TELEGRAM_TOKEN)
+    dp = updater.dispatcher
+
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("help", help_command))
+    dp.add_handler(CommandHandler("price", price))
+    dp.add_handler(CommandHandler("pumpfun", pumpfun))
+    dp.add_handler(CommandHandler("alert", alert))
+    dp.add_handler(CommandHandler("trending", trending))
+    dp.add_handler(CommandHandler("portfolio", portfolio))
+    dp.add_handler(CommandHandler("risk", risk))
+    dp.add_handler(CommandHandler("news", news))
+
+    updater.start_polling()
+    updater.idle()
+
+
+if __name__ == "__main__":
+    main()    try:
         symbol = context.args[0].upper() if context.args else "BTC"
 
         url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
